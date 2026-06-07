@@ -136,6 +136,7 @@ sensor:
     address: 0x0418 
     register_type: holding
     value_type: S_WORD # File says I16
+    update_interval: 30s
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
@@ -148,6 +149,7 @@ sensor:
     address: 0x0427
     register_type: holding
     value_type: U_DWORD # Reads 2 registers (0x0427-0428)
+    update_interval: 1800s
     unit_of_measurement: "h"
     device_class: duration
     state_class: total_increasing
@@ -214,6 +216,19 @@ sensor:
     filters:
       - multiply: 0.01
 
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Active Power Phase R"
+    address: 0x048F
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
   # --- Phase S ---
   - platform: modbus_controller
     modbus_controller_id: sofar_hyd
@@ -241,6 +256,19 @@ sensor:
     filters:
       - multiply: 0.01
 
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Active Power Phase S"
+    address: 0x049A
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
   # --- Phase T ---
   - platform: modbus_controller
     modbus_controller_id: sofar_hyd
@@ -267,6 +295,19 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Active Power Phase T"
+    address: 0x04A5
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
 
   # =========================================================
   # 2.4 PV Input (0x0580 - 0x05FF)
@@ -425,6 +466,7 @@ sensor:
     address: 0x0609
     register_type: holding
     value_type: U_WORD
+    update_interval: 3600s
     unit_of_measurement: "%"
     state_class: measurement
     accuracy_decimals: 0
@@ -435,6 +477,7 @@ sensor:
     address: 0x060A
     register_type: holding
     value_type: U_WORD
+    update_interval: 3600s
     unit_of_measurement: "cycles"
     state_class: total_increasing
 
@@ -561,6 +604,31 @@ sensor:
     accuracy_decimals: 1
     filters:
       - multiply: 0.1 # File says 0.1kWh accuracy
+      # To avoid glitches
+      - lambda: |-
+          static float last_value = 0.0;
+          
+          // 1. Accept the first valid reading on boot
+          if (last_value == 0.0) {
+            last_value = x;
+            return x;
+          }
+          
+          // 2. Ignore impossible spikes (e.g., generating/selling > 5 kWh in 10 seconds)
+          if (x > last_value + 5.0) {
+            ESP_LOGW("modbus_filter", "Blocked massive spike! Tried to jump from %.1f to %.1f", last_value, x);
+            return {}; 
+          }
+          
+          // 3. Ignore impossible drops (cumulative totals should never go down, or drop to 0)
+          if (x < last_value - 1.0) {
+            ESP_LOGW("modbus_filter", "Blocked sudden drop! Tried to drop from %.1f to %.1f", last_value, x);
+            return {};
+          }
+          
+          // 4. If the data is sane, save it and send it to Home Assistant
+          last_value = x;
+          return x;
 
   # 2. Total Grid Import (Buying from Grid)
   # Used for "Grid Consumption" in Energy Dashboard
@@ -576,6 +644,31 @@ sensor:
     accuracy_decimals: 1
     filters:
       - multiply: 0.1
+      # To avoid glitches
+      - lambda: |-
+          static float last_value = 0.0;
+          
+          // 1. Accept the first valid reading on boot
+          if (last_value == 0.0) {
+            last_value = x;
+            return x;
+          }
+          
+          // 2. Ignore impossible spikes (e.g., generating/selling > 5 kWh in 10 seconds)
+          if (x > last_value + 5.0) {
+            ESP_LOGW("modbus_filter", "Blocked massive spike! Tried to jump from %.1f to %.1f", last_value, x);
+            return {}; 
+          }
+          
+          // 3. Ignore impossible drops (cumulative totals should never go down, or drop to 0)
+          if (x < last_value - 1.0) {
+            ESP_LOGW("modbus_filter", "Blocked sudden drop! Tried to drop from %.1f to %.1f", last_value, x);
+            return {};
+          }
+          
+          // 4. If the data is sane, save it and send it to Home Assistant
+          last_value = x;
+          return x;
 
   # 3. Total Grid Export (Selling to Grid)
   # Used for "Return to Grid" in Energy Dashboard
@@ -591,6 +684,31 @@ sensor:
     accuracy_decimals: 1
     filters:
       - multiply: 0.1
+      # To avoid glitches
+      - lambda: |-
+          static float last_value = 0.0;
+          
+          // 1. Accept the first valid reading on boot
+          if (last_value == 0.0) {
+            last_value = x;
+            return x;
+          }
+          
+          // 2. Ignore impossible spikes (e.g., generating/selling > 5 kWh in 10 seconds)
+          if (x > last_value + 5.0) {
+            ESP_LOGW("modbus_filter", "Blocked massive spike! Tried to jump from %.1f to %.1f", last_value, x);
+            return {}; 
+          }
+          
+          // 3. Ignore impossible drops (cumulative totals should never go down, or drop to 0)
+          if (x < last_value - 1.0) {
+            ESP_LOGW("modbus_filter", "Blocked sudden drop! Tried to drop from %.1f to %.1f", last_value, x);
+            return {};
+          }
+          
+          // 4. If the data is sane, save it and send it to Home Assistant
+          last_value = x;
+          return x;
 
   # 4. Total Battery Charge (Energy INTO Battery)
   # Used for "Battery Systems" -> "Energy Going In"
@@ -606,6 +724,31 @@ sensor:
     accuracy_decimals: 1
     filters:
       - multiply: 0.1
+      # To avoid glitches
+      - lambda: |-
+          static float last_value = 0.0;
+          
+          // 1. Accept the first valid reading on boot
+          if (last_value == 0.0) {
+            last_value = x;
+            return x;
+          }
+          
+          // 2. Ignore impossible spikes (e.g., generating/selling > 5 kWh in 10 seconds)
+          if (x > last_value + 5.0) {
+            ESP_LOGW("modbus_filter", "Blocked massive spike! Tried to jump from %.1f to %.1f", last_value, x);
+            return {}; 
+          }
+          
+          // 3. Ignore impossible drops (cumulative totals should never go down, or drop to 0)
+          if (x < last_value - 1.0) {
+            ESP_LOGW("modbus_filter", "Blocked sudden drop! Tried to drop from %.1f to %.1f", last_value, x);
+            return {};
+          }
+          
+          // 4. If the data is sane, save it and send it to Home Assistant
+          last_value = x;
+          return x;
 
   # 5. Total Battery Discharge (Energy OUT OF Battery)
   # Used for "Battery Systems" -> "Energy Coming Out"
@@ -621,6 +764,31 @@ sensor:
     accuracy_decimals: 1
     filters:
       - multiply: 0.1
+      # To avoid glitches
+      - lambda: |-
+          static float last_value = 0.0;
+          
+          // 1. Accept the first valid reading on boot
+          if (last_value == 0.0) {
+            last_value = x;
+            return x;
+          }
+          
+          // 2. Ignore impossible spikes (e.g., generating/selling > 5 kWh in 10 seconds)
+          if (x > last_value + 5.0) {
+            ESP_LOGW("modbus_filter", "Blocked massive spike! Tried to jump from %.1f to %.1f", last_value, x);
+            return {}; 
+          }
+          
+          // 3. Ignore impossible drops (cumulative totals should never go down, or drop to 0)
+          if (x < last_value - 1.0) {
+            ESP_LOGW("modbus_filter", "Blocked sudden drop! Tried to drop from %.1f to %.1f", last_value, x);
+            return {};
+          }
+          
+          // 4. If the data is sane, save it and send it to Home Assistant
+          last_value = x;
+          return x;
 
   # Wifi dBm
   - platform: wifi_signal
