@@ -1,0 +1,682 @@
+esphome:
+  name: "sofar-inverter"
+  friendly_name: "Sofar Inverter HYD-3PH"
+  platformio_options:
+    board_upload.maximum_size: 4194304
+  on_boot:
+      priority: 800
+      then:
+        - wifi.disable:
+        - output.turn_off: pin3 # activate RF Switch control
+        - delay: 100ms
+        - switch.turn_on: pin14 
+        - wifi.enable:
+
+output:
+    platform: gpio
+    id: pin3
+    pin: GPIO03
+
+switch:
+  - platform: gpio
+    pin: GPIO14
+    restore_mode: ALWAYS_OFF 
+    name: "External Wifi Antenna On/Off"
+    id: pin14
+    
+  # --- Exposed Water Heater Relays ---
+  - platform: gpio
+    id: relay_r
+    name: "Water Heater Phase R"
+    pin: GPIO0
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: relay_s
+    name: "Water Heater Phase S"
+    pin: GPIO1
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: relay_t
+    name: "Water Heater Phase T"
+    pin: GPIO2
+    restore_mode: ALWAYS_OFF
+
+esp32:
+  board: seeed_xiao_esp32c6
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+# --- Home Assistant API (No Encryption) ---
+api:
+  # No 'encryption' block here means clear text communication
+
+  on_client_disconnected:
+    - script.execute: ha_watchdog
+
+  on_client_connected:
+    - script.stop: ha_watchdog
+    - logger.log: "HA Connected. Watchdog timer cancelled."
+
+# Enable Over-The-Air updates
+ota:
+  - platform: esphome
+
+# WiFi Configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  output_power: 20
+
+  reboot_timeout: 5 min
+
+  ap:
+    ssid: "Sofar-Inverter-Fallback"
+    password: !secret wifi_ap_password
+
+  power_save_mode: none 
+
+captive_portal:
+
+# --- Hardware & Modbus Configuration ---
+
+uart:
+  id: modbus_uart
+  tx_pin: GPIO19
+  rx_pin: GPIO17
+  baud_rate: 9600 
+  stop_bits: 1
+  parity: NONE
+
+modbus:
+  id: modbus_hub
+  uart_id: modbus_uart
+
+modbus_controller:
+  - id: sofar_hyd
+    address: 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s
+
+# One wire for temperature sensor
+one_wire:
+  - platform: gpio
+    pin: GPIO18  # Physical Pin D10
+    id: dallas_hub
+
+# --- Sensors ---
+
+sensor:
+  # =========================================================
+  # 2.1 System Information (0x0400 - 0x047F)
+  # =========================================================
+  
+  # Operating State (0=Wait, 1=Check, 2=Normal, 3=Fault...)
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Operating State ID"
+    id: inverter_state_id
+    address: 0x0404
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+  # Inverter Temperature (Internal/Heatsink)
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Temperature"
+    address: 0x0418 
+    register_type: holding
+    value_type: S_WORD # File says I16
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # Total Generation Time (High + Low bytes, U32)
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total Generation Time"
+    address: 0x0427
+    register_type: holding
+    value_type: U_DWORD # Reads 2 registers (0x0427-0428)
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: total_increasing
+    filters:
+      - multiply: 0.016666 # Convert Minutes to Hours
+
+  # =========================================================
+  # 2.2 Grid-Connected Output (0x0480 - 0x04FF)
+  # =========================================================
+
+  # Grid Frequency
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Frequency"
+    address: 0x0484
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  # Total Active Power Output (Inverter Output)
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Active Power Output (Total)"
+    address: 0x0485
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      # File says 0.01kW (10W). 1 = 10W. 
+      - multiply: 10 
+
+  # --- Phase R ---
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Voltage Phase R"
+    address: 0x048D
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Current Phase R"
+    address: 0x048E
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  # --- Phase S ---
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Voltage Phase S"
+    address: 0x0498
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Current Phase S"
+    address: 0x0499
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  # --- Phase T ---
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Voltage Phase T"
+    address: 0x04A3
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Grid Current Phase T"
+    address: 0x04A4
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  # =========================================================
+  # 2.4 PV Input (0x0580 - 0x05FF)
+  # =========================================================
+
+  # PV1
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV1 Voltage"
+    address: 0x0584
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV1 Current"
+    address: 0x0585
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV1 Power"
+    address: 0x0586
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10 # 0.01kW -> W
+
+  # PV2
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV2 Voltage"
+    address: 0x0587 # 0x0584 + 3
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV2 Current"
+    address: 0x0588 # 0x0585 + 3
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV2 Power"
+    address: 0x0589 # 0x0586 + 3
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
+  # Total PV Power
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PV Power Total"
+    address: 0x05C4
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 100 # File says 0.1kW accuracy for Total. 0.1kW = 100W
+
+  # =========================================================
+  # 2.5 Battery Input (0x0600 - 0x067F)
+  # =========================================================
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery Voltage"
+    address: 0x0604
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery Current"
+    address: 0x0605
+    register_type: holding
+    value_type: S_WORD # Signed: Charging (+) / Discharging (-)
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery Power"
+    address: 0x0606
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    filters:
+      - multiply: -10 # 0.01kW -> W
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery SOC"
+    address: 0x0608
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery SOH"
+    address: 0x0609
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Battery Cycles"
+    address: 0x060A
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "cycles"
+    state_class: total_increasing
+
+
+  # =========================================================
+  # PCC (Point of Common Coupling) / Smart Meter Data
+  # =========================================================
+
+  # Total PCC Active Power (Grid Import/Export)
+  # Positive = Selling (Export), Negative = Buying (Import)
+  # Inverted because of the energy dashboard
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Active Power Total"
+    address: 0x0488
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: -10 # Register is 0.01kW. 1 = 10W.
+
+  # --- PCC Phase R ---
+  
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Current Phase R"
+    address: 0x0492
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Active Power Phase R"
+    address: 0x0493
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: -10
+
+  # --- PCC Phase S ---
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Current Phase S"
+    address: 0x049D
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Active Power Phase S"
+    address: 0x049E
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: -10
+
+  # --- PCC Phase T ---
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Current Phase T"
+    address: 0x04A8
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "PCC Active Power Phase T"
+    address: 0x04A9
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: -10
+
+  # =========================================================
+  # Energy Counters (kWh) for HA Energy Dashboard
+  # =========================================================
+
+  # 1. Total Solar Generation (Lifetime)
+  # Used for "Solar Production" in Energy Dashboard
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total PV Generation"
+    address: 0x0686
+    register_type: holding
+    value_type: U_DWORD  # Reads 2 registers (0x0686-0x0687)
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1 # File says 0.1kWh accuracy
+
+  # 2. Total Grid Import (Buying from Grid)
+  # Used for "Grid Consumption" in Energy Dashboard
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total Energy Purchased (Import)"
+    address: 0x068E
+    register_type: holding
+    value_type: U_DWORD  # Reads 0x068E-0x068F
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # 3. Total Grid Export (Selling to Grid)
+  # Used for "Return to Grid" in Energy Dashboard
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total Energy Sold (Export)"
+    address: 0x0692
+    register_type: holding
+    value_type: U_DWORD  # Reads 0x0692-0x0693
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # 4. Total Battery Charge (Energy INTO Battery)
+  # Used for "Battery Systems" -> "Energy Going In"
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total Battery Charge"
+    address: 0x0696
+    register_type: holding
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # 5. Total Battery Discharge (Energy OUT OF Battery)
+  # Used for "Battery Systems" -> "Energy Coming Out"
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Total Battery Discharge"
+    address: 0x069A
+    register_type: holding
+    value_type: U_DWORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Wifi dBm
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    update_interval: 60s
+    entity_category: "diagnostic"
+    unit_of_measurement: "dBm"
+
+  # Water heater temp sensor
+  - platform: dallas_temp
+    one_wire_id: dallas_hub
+    
+    # Use index: 0 to grab the first sensor found without needing the address
+    index: 0  
+    
+    name: "Water Heater Temperature"
+    id: water_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+
+text_sensor:
+  - platform: template
+    name: "Inverter Status"
+    lambda: |-
+      auto s = id(inverter_state_id).state;
+      if (s == 0) return {"Wait"};
+      if (s == 1) return {"Check"};
+      if (s == 2) return {"Normal"};
+      if (s == 3) return {"Emergency Power"};
+      if (s == 4) return {"Recoverable Fault"};
+      if (s == 5) return {"Permanent Fault"};
+      if (s == 6) return {"Upgrade"};
+      if (s == 7) return {"Self-Charging"};
+      return {"Unknown"};
+
+# ***************** Protections *****************
+
+script:
+  - id: ha_watchdog
+    mode: RESTART
+    then:
+      - logger.log: "HA Disconnected. Starting 5-minute safety timer."
+      
+      # Wait for 5 minutes
+      - delay: 5min
+      
+      # If we are still here, the connection is definitely dead. Shutdown.
+      - logger.log: "Home Assistant lost for >5 min! Shutting down water heater."
+      
+      # Turn off all relays physically
+      - switch.turn_off: relay_r
+      - switch.turn_off: relay_s
+      - switch.turn_off: relay_t
