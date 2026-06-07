@@ -186,6 +186,20 @@ sensor:
       # File says 0.01kW (10W). 1 = 10W. 
       - multiply: 10 
 
+  # Total Apparent Power Output (Inverter Output)
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Apparent Power Output (Total)"
+    address: 0x0487
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "VA"
+    device_class: apparent_power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
   # --- Phase R ---
   - platform: modbus_controller
     modbus_controller_id: sofar_hyd
@@ -221,6 +235,19 @@ sensor:
     value_type: S_WORD
     unit_of_measurement: "W"
     device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Apparent Power Phase R"
+    address: 0x0491
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "VA"
+    device_class: apparent_power
     state_class: measurement
     accuracy_decimals: 0
     filters:
@@ -266,6 +293,19 @@ sensor:
     filters:
       - multiply: 10
 
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Apparent Power Phase S"
+    address: 0x049C
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "VA"
+    device_class: apparent_power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
   # --- Phase T ---
   - platform: modbus_controller
     modbus_controller_id: sofar_hyd
@@ -301,6 +341,19 @@ sensor:
     value_type: S_WORD
     unit_of_measurement: "W"
     device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - multiply: 10
+
+  - platform: modbus_controller
+    modbus_controller_id: sofar_hyd
+    name: "Inverter Apparent Power Phase T"
+    address: 0x04A7
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "VA"
+    device_class: apparent_power
     state_class: measurement
     accuracy_decimals: 0
     filters:
