@@ -103,7 +103,6 @@ modbus_controller:
     address: 1
     modbus_id: modbus_hub
     setup_priority: -10
-    update_interval: 10s
 
 # One wire for temperature sensor
 one_wire:
@@ -136,7 +135,6 @@ sensor:
     address: 0x0418 
     register_type: holding
     value_type: S_WORD # File says I16
-    update_interval: 30s
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
@@ -149,7 +147,6 @@ sensor:
     address: 0x0427
     register_type: holding
     value_type: U_DWORD # Reads 2 registers (0x0427-0428)
-    update_interval: 1800s
     unit_of_measurement: "h"
     device_class: duration
     state_class: total_increasing
@@ -466,7 +463,6 @@ sensor:
     address: 0x0609
     register_type: holding
     value_type: U_WORD
-    update_interval: 3600s
     unit_of_measurement: "%"
     state_class: measurement
     accuracy_decimals: 0
@@ -477,7 +473,6 @@ sensor:
     address: 0x060A
     register_type: holding
     value_type: U_WORD
-    update_interval: 3600s
     unit_of_measurement: "cycles"
     state_class: total_increasing
 
