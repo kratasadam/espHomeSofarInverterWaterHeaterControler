@@ -28,7 +28,7 @@ switch:
   - platform: gpio
     id: relay_r
     name: "Water Heater Phase R"
-    pin: GPIO0
+    pin: GPIO2
     restore_mode: ALWAYS_OFF
   - platform: gpio
     id: relay_s
@@ -38,7 +38,7 @@ switch:
   - platform: gpio
     id: relay_t
     name: "Water Heater Phase T"
-    pin: GPIO2
+    pin: GPIO0
     restore_mode: ALWAYS_OFF
 
 esp32:
